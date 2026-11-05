@@ -213,10 +213,23 @@ assemble() {
       [ -f "$PORTABLE_GIT/bin/bash.exe" ] || die "--portable-git 폴더에 bin/bash.exe가 없습니다: $PORTABLE_GIT"
       cp -R "$PORTABLE_GIT" "$stage/tools/PortableGit"
     elif [ -f "$PORTABLE_GIT" ]; then
-      cp "$PORTABLE_GIT" "$stage/tools/"
-      echo "알림: PortableGit 압축 실행 파일을 tools/ 에 넣었습니다. Windows에서 tools\\PortableGit 으로 풀어야 합니다." >&2
+      # PortableGit-*.7z.exe : 7z(7zz/7za)로 tools/PortableGit 에 푼다
+      local sz=""
+      for c in 7z 7zz 7za; do command -v "$c" >/dev/null 2>&1 && { sz="$c"; break; }; done
+      [ -n "$sz" ] || die "PortableGit(.7z.exe)를 풀려면 7z(7zz/7za)가 필요합니다. 폴더로 풀어 --portable-git <폴더>로 지정해도 됩니다"
+      mkdir -p "$stage/tools/PortableGit"
+      "$sz" x -y -bso0 -bsp0 "-o$stage/tools/PortableGit" "$PORTABLE_GIT" || die "PortableGit 압축 해제 실패"
     else
       die "--portable-git 경로를 찾을 수 없습니다: $PORTABLE_GIT"
+    fi
+  fi
+
+  if [ "$os" = windows ] && [ -n "$PORTABLE_GIT" ]; then
+    [ -f "$stage/tools/PortableGit/bin/bash.exe" ] || die "PortableGit/bin/bash.exe를 찾을 수 없습니다"
+    if [ -f "$stage/tools/PortableGit/LICENSE.txt" ]; then
+      cp "$stage/tools/PortableGit/LICENSE.txt" "$stage/licenses/LICENSE.git-for-windows.txt"
+    else
+      echo "Git for Windows is GPLv2. Source: https://github.com/git-for-windows/git" > "$stage/licenses/LICENSE.git-for-windows.txt"
     fi
   fi
 

@@ -15,8 +15,9 @@ gjc-connect-<대상>-<버전>/
 ├─ gjc-connect(.exe)      이 도구
 ├─ bin/gjc(.exe)          공식 gjc 실행 파일
 ├─ data/                  설정·프로필 (처음 실행하면 채워짐)
-├─ tools/PortableGit/     (Windows, 선택) Git Bash — 없으면 Git for Windows를 따로 설치
-├─ licenses/              gjc 라이선스·고지
+├─ tools/PortableGit/     (Windows) 동봉된 Git for Windows(PortableGit) — Git이 없는 PC에서도 Bash 도구 동작.
+│                         다른 Git을 쓰려면 GJC_BASH_PATH 지정
+├─ licenses/              gjc 및 Git for Windows(GPLv2) 라이선스·고지
 ├─ bundle.json            묶음 버전·체크섬 정보
 └─ README.md
 ```

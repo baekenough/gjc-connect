@@ -23,6 +23,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   GJC_VERSION: ${{ inputs.gjc_version || '0.19.3' }}
+  # PortableGit bundled into the Windows package (pinned + SHA256-verified).
+  PORTABLE_GIT_TAG: v2.56.0.windows.2
+  PORTABLE_GIT_ASSET: PortableGit-2.56.0.2-64-bit.7z.exe
+  PORTABLE_GIT_SHA256: 075e158ef8e1f0ab80b347e245405d3eca735c2dc88fd8e032e137d0ca61f61b
 
 jobs:
   check:
@@ -107,8 +111,25 @@ jobs:
           done
           printf '{\n  "name": "%s",\n  "target": "%s",\n  "gjcVersion": "%s",\n  "gjcAsset": "%s",\n  "gjcSha256": "%s"\n}\n' \
             "$name" "${{ matrix.target }}" "$GJC_VERSION" "$asset" "$actual" > "$stage/bundle.json"
-          # Git Bash has no zip; use PowerShell's Compress-Archive.
-          powershell -NoProfile -Command "Compress-Archive -Path 'dist/stage/$name' -DestinationPath 'dist/$name.zip'"
+          # PortableGit (offline target PCs may have no Git): download, verify, extract.
+          pg_url="https://github.com/git-for-windows/git/releases/download/${PORTABLE_GIT_TAG}/${PORTABLE_GIT_ASSET}"
+          curl -fsSL --retry 3 -o ".cache/$PORTABLE_GIT_ASSET" "$pg_url"
+          pg_actual="$(sha256sum ".cache/$PORTABLE_GIT_ASSET" | awk '{print $1}')"
+          [ "$pg_actual" = "$PORTABLE_GIT_SHA256" ] || { echo "PortableGit SHA256 mismatch: expected $PORTABLE_GIT_SHA256 got $pg_actual" >&2; exit 1; }
+          mkdir -p "$stage/tools/PortableGit"
+          ".cache/$PORTABLE_GIT_ASSET" -y -o"$(cygpath -w "$PWD/$stage/tools/PortableGit")" >/dev/null
+          [ -f "$stage/tools/PortableGit/bin/bash.exe" ] || { echo "PortableGit extraction failed: bin/bash.exe missing" >&2; exit 1; }
+          if [ -f "$stage/tools/PortableGit/LICENSE.txt" ]; then
+            cp "$stage/tools/PortableGit/LICENSE.txt" "$stage/licenses/LICENSE.git-for-windows.txt"
+          else
+            printf 'Git for Windows is GPLv2. Source: https://github.com/git-for-windows/git/tree/%s\n' "$PORTABLE_GIT_TAG" > "$stage/licenses/LICENSE.git-for-windows.txt"
+          fi
+          # Zip with 7-Zip so entries use "/" separators (Compress-Archive writes "\").
+          sevenzip="$(command -v 7z || true)"
+          [ -n "$sevenzip" ] || sevenzip="/c/Program Files/7-Zip/7z.exe"
+          (cd dist/stage && "$sevenzip" a -tzip -mx=5 -bso0 -bsp0 "../$name.zip" "$name")
+          # Sanity: no backslashes in entry names, bash.exe present.
+          "$sevenzip" l -ba "dist/$name.zip" | grep -F "$name/tools/PortableGit/bin/bash.exe" >/dev/null
           rm -rf dist/stage
           (cd dist && sha256sum "$name.zip" > SHA256SUMS)
           cat dist/SHA256SUMS
