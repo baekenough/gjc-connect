@@ -128,8 +128,8 @@ jobs:
           sevenzip="$(command -v 7z || true)"
           [ -n "$sevenzip" ] || sevenzip="/c/Program Files/7-Zip/7z.exe"
           (cd dist/stage && "$sevenzip" a -tzip -mx=5 -bso0 -bsp0 "../$name.zip" "$name")
-          # Sanity: no backslashes in entry names, bash.exe present.
-          "$sevenzip" l -ba "dist/$name.zip" | grep -F "$name/tools/PortableGit/bin/bash.exe" >/dev/null
+          # Sanity: entry names use "/" only and bash.exe is inside (python is preinstalled).
+          python -I -c "import sys,zipfile; n=zipfile.ZipFile(sys.argv[1]).namelist(); assert not any(chr(92) in x for x in n), 'backslash in zip entry'; assert sys.argv[2]+'/tools/PortableGit/bin/bash.exe' in n, 'bash.exe missing'; print(len(n),'entries OK')" "dist/$name.zip" "$name"
           rm -rf dist/stage
           (cd dist && sha256sum "$name.zip" > SHA256SUMS)
           cat dist/SHA256SUMS
