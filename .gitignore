@@ -1,0 +1,5 @@
+target/
+dist/
+.cache/
+.DS_Store
+.env

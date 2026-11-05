@@ -1,0 +1,120 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      gjc_version:
+        description: 'gjc release version to bundle'
+        default: '0.19.3'
+        required: false
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  GJC_VERSION: ${{ inputs.gjc_version || '0.19.3' }}
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 was retired by GitHub; macos-15-intel is the x64 replacement.
+        os: [windows-latest, macos-14, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      # Formatting is OS-independent; check it once.
+      - name: cargo fmt
+        if: matrix.os == 'macos-14'
+        run: cargo fmt --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --locked
+
+  bundle:
+    name: bundle (${{ matrix.target }})
+    needs: check
+    # Only on manual dispatch or a release tag.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: windows-x64, rust_target: x86_64-pc-windows-msvc, asset: gjc-windows-x64.exe }
+          - { os: macos-14, target: macos-arm64, rust_target: aarch64-apple-darwin, asset: gjc-darwin-arm64 }
+          - { os: macos-15-intel, target: macos-x64, rust_target: x86_64-apple-darwin, asset: gjc-darwin-x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - uses: Swatinem/rust-cache@v2
+
+      # macOS: the script builds natively when --targets is limited to the host target.
+      - name: Build bundle (macOS, scripts/build-bundle.sh)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/build-bundle.sh --version "$GJC_VERSION" --targets "${{ matrix.target }}" --strict
+
+      # Windows: the script only cross-compiles Windows from non-Windows hosts
+      # (cargo-xwin/zigbuild/mingw), so do the same steps natively here.
+      - name: Build bundle (Windows, native)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/Yeachan-Heo/gajae-code/releases/download/v${GJC_VERSION}"
+          name="gjc-connect-${{ matrix.target }}-${GJC_VERSION}"
+          asset="${{ matrix.asset }}"
+          mkdir -p .cache dist
+          # Download gjc and verify its SHA256 against the release checksum file.
+          curl -fsSL --retry 3 -o .cache/checksums "$base/gajae-release-binaries.sha256"
+          curl -fsSL --retry 3 -o ".cache/$asset" "$base/$asset"
+          expected="$(awk -v a="$asset" '$2 == a {print $1}' .cache/checksums)"
+          [ -n "$expected" ] || { echo "no checksum entry for $asset" >&2; exit 1; }
+          actual="$(sha256sum ".cache/$asset" | awk '{print $1}')"
+          [ "$expected" = "$actual" ] || { echo "SHA256 mismatch: $expected vs $actual" >&2; exit 1; }
+          cargo build --release --locked --target "${{ matrix.rust_target }}"
+          # Assemble the same layout as build-bundle.sh.
+          stage="dist/stage/$name"
+          mkdir -p "$stage/bin" "$stage/data" "$stage/licenses"
+          cp "target/${{ matrix.rust_target }}/release/gjc-connect.exe" "$stage/gjc-connect.exe"
+          cp ".cache/$asset" "$stage/bin/gjc.exe"
+          cp README.md "$stage/README.md"
+          : > "$stage/data/.keep"
+          for f in LICENSE NOTICE.md; do
+            curl -fsSL --retry 2 -o "$stage/licenses/$f.gajae-code" \
+              "https://raw.githubusercontent.com/Yeachan-Heo/gajae-code/v${GJC_VERSION}/$f" \
+              || echo "warning: could not fetch $f"
+          done
+          printf '{\n  "name": "%s",\n  "target": "%s",\n  "gjcVersion": "%s",\n  "gjcAsset": "%s",\n  "gjcSha256": "%s"\n}\n' \
+            "$name" "${{ matrix.target }}" "$GJC_VERSION" "$asset" "$actual" > "$stage/bundle.json"
+          # Git Bash has no zip; use PowerShell's Compress-Archive.
+          powershell -NoProfile -Command "Compress-Archive -Path 'dist/stage/$name' -DestinationPath 'dist/$name.zip'"
+          rm -rf dist/stage
+          (cd dist && sha256sum "$name.zip" > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gjc-connect-${{ matrix.target }}-${{ env.GJC_VERSION }}
+          path: dist/*
+          if-no-files-found: error

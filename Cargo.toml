@@ -1,0 +1,39 @@
+[package]
+name = "gjc-connect"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Gajae-Code(gjc)를 사내망 모델 서버에 연결해 주는 설정·실행 도구"
+publish = false
+
+[lib]
+name = "gjc_connect"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gjc-connect"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.5.61", features = ["derive", "string"] }
+console = "0.16.6"
+ctrlc = "3.5.2"
+dialoguer = "0.12.0"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_yaml_ng = "0.10.0"
+thiserror = "2.0.21"
+ureq = { version = "2", features = ["native-certs"] }
+url = "2.5.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
